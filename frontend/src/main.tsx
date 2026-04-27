@@ -8,7 +8,6 @@ import {
   SlidersHorizontal,
   Sparkles,
   Upload,
-  Waves,
 } from "lucide-react";
 import "./styles.css";
 
@@ -22,6 +21,9 @@ type MixResponse = {
     cut_seconds: number;
     crossfade_seconds: number;
     tempo_rate: number;
+    a_transition_rate: number;
+    b_intro_rate: number;
+    b_body_start_seconds: number;
     pitch_shift_semitones: number;
   };
   track_a: TrackSummary;
@@ -35,6 +37,8 @@ type MixResponse = {
     compatible_before: boolean;
     compatible_after: boolean;
     suggested_pitch_shift_semitones: number;
+    transition_key: string;
+    transition_camelot: string;
   };
 };
 
@@ -48,8 +52,7 @@ type TrackSummary = {
 function App() {
   const [trackA, setTrackA] = useState<File | null>(null);
   const [trackB, setTrackB] = useState<File | null>(null);
-  const [crossfade, setCrossfade] = useState(8);
-  const [phraseBars, setPhraseBars] = useState(8);
+  const [phraseBars, setPhraseBars] = useState(16);
   const [harmonicCorrection, setHarmonicCorrection] = useState(true);
   const [result, setResult] = useState<MixResponse | null>(null);
   const [error, setError] = useState("");
@@ -67,7 +70,6 @@ function App() {
     const formData = new FormData();
     formData.append("track_a", trackA);
     formData.append("track_b", trackB);
-    formData.append("crossfade_seconds", String(crossfade));
     formData.append("phrase_bars", String(phraseBars));
     formData.append("harmonic_correction", String(harmonicCorrection));
 
@@ -91,22 +93,6 @@ function App() {
   return (
     <main className="shell">
       <section className="workspace">
-        <header className="topbar">
-          <div className="brand">
-            <span className="brandMark">
-              <Waves size={18} />
-            </span>
-            <div>
-              <h1>AutoDJ</h1>
-              <p>MIR transition engine</p>
-            </div>
-          </div>
-          <button className="ghostButton" onClick={submitMix} disabled={!canSubmit}>
-            {loading ? <Loader2 className="spin" size={18} /> : <Sparkles size={18} />}
-            Render Mix
-          </button>
-        </header>
-
         <section className="deckGrid">
           <UploadDeck label="Track A" file={trackA} onChange={setTrackA} accent="a" />
           <UploadDeck label="Track B" file={trackB} onChange={setTrackB} accent="b" />
@@ -117,20 +103,12 @@ function App() {
             <SlidersHorizontal size={18} />
             <span>Transition</span>
           </div>
-          <label className="sliderControl">
-            <span>Crossfade</span>
-            <input
-              type="range"
-              min="2"
-              max="30"
-              step="1"
-              value={crossfade}
-              onChange={(event) => setCrossfade(Number(event.target.value))}
-            />
-            <strong>{crossfade}s</strong>
-          </label>
+          <div className="fixedValue">
+            <span>Transition</span>
+            <strong>Auto</strong>
+          </div>
           <div className="segmented">
-            {[4, 8, 16].map((bars) => (
+            {[8, 16, 24].map((bars) => (
               <button
                 key={bars}
                 className={phraseBars === bars ? "active" : ""}
@@ -150,6 +128,10 @@ function App() {
             <span />
             Harmonic shift
           </label>
+          <button className="ghostButton" onClick={submitMix} disabled={!canSubmit}>
+            {loading ? <Loader2 className="spin" size={18} /> : <Sparkles size={18} />}
+            Render Mix
+          </button>
         </section>
 
         {error && <div className="error">{error}</div>}
@@ -174,15 +156,17 @@ function App() {
               <div className="analysisGrid">
                 <Metric label="A BPM" value={result.track_a.bpm} />
                 <Metric label="B BPM" value={result.track_b.bpm} />
-                <Metric label="Rate" value={`${result.mix.tempo_rate}x`} />
-                <Metric label="Pitch" value={`${result.mix.pitch_shift_semitones} st`} />
+                <Metric label="A Transition" value={`${result.mix.a_transition_rate}x`} />
+                <Metric label="B Original" value={`${result.mix.b_intro_rate}x`} />
+                <Metric label="Transition" value={`${result.mix.crossfade_seconds}s`} />
                 <Metric label="A Key" value={`${result.track_a.key} · ${result.track_a.camelot}`} />
                 <Metric label="B Key" value={`${result.track_b.key} · ${result.track_b.camelot}`} />
                 <Metric
-                  label="B Rendered"
-                  value={`${result.track_b_after_processing.estimated_key} · ${result.track_b_after_processing.estimated_camelot}`}
+                  label="Transition Key"
+                  value={`${result.harmonic.transition_key} · ${result.harmonic.transition_camelot}`}
                 />
-                <Metric label="Cut" value={`${result.mix.cut_seconds}s`} />
+                <Metric label="B Body Starts" value={`${result.mix.b_body_start_seconds}s`} />
+                <Metric label="A Ends" value={`${result.mix.cut_seconds}s`} />
               </div>
             </>
           ) : (

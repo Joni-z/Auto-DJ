@@ -1,6 +1,6 @@
 # AutoDJ
 
-AutoDJ is a local full-stack automatic DJ transition tool. Upload two audio files, analyze tempo and key, time-stretch the second track to the first track's BPM, optionally apply harmonic correction, and render a crossfaded transition.
+AutoDJ is a local full-stack automatic DJ transition tool. Upload two audio files, analyze tempo and key, locally morph only the transition region, and render a DJ-style handoff while preserving the body of the incoming track.
 
 ## Stack
 
@@ -14,8 +14,7 @@ Terminal 1:
 
 ```bash
 cd backend
-python3 -m venv .venv
-source .venv/bin/activate
+conda activate ml
 pip install -r requirements.txt
 uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
@@ -46,8 +45,8 @@ brew install ffmpeg
 - `POST /api/mix` accepts multipart fields:
   - `track_a`: first audio file
   - `track_b`: second audio file
-  - `crossfade_seconds`: crossfade duration
-  - `phrase_bars`: phrase alignment in bars
-  - `harmonic_correction`: whether to pitch-shift B toward a compatible Camelot key
+  - `crossfade_seconds`: optional; omitted by the frontend because the backend estimates transition duration from BPM and phrase length
+  - `phrase_bars`: phrase alignment in bars, one of 8, 16, or 24
+  - `harmonic_correction`: whether to morph Track A's transition segment toward a compatible Camelot key
 
 The response includes the analysis report and a `download_url` for the rendered WAV.

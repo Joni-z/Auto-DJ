@@ -21,26 +21,26 @@ AutoDJ is a local web application that renders an automatic transition between t
 \section{Introduction}
 DJ mixing is a real-time musical practice built around timing, phrasing, timbre, and harmonic continuity. A smooth transition usually requires the incoming track to be tempo-aligned with the outgoing track, introduced at a musically meaningful phrase boundary, and blended without abrupt level changes. Human DJs learn these decisions through listening and repeated practice. AutoDJ investigates how far a compact MIR pipeline can automate this workflow for two arbitrary audio clips.
 
-The project accepts two audio files: Track A, the outgoing track, and Track B, the incoming track. It estimates the tempo and key of each file, stretches Track B so that its beat grid approximates Track A, optionally shifts Track B toward a harmonically compatible key, selects a phrase-aligned cut point in Track A, and renders a crossfaded output. The application is designed to run locally so that the user can experiment with different transition lengths and phrase sizes without relying on cloud processing.
+The project accepts two audio files: Track A, the outgoing track, and Track B, the incoming track. It estimates the tempo and key of each file, selects a phrase-aligned cut point in Track A, and modifies only the transition region. Track A's final phrase can be gradually time-stretched and pitch-morphed toward Track B, while Track B remains at its original tempo and key. During the overlap, Track B's low-frequency content enters before the full mix, after which the original Track B body resumes unchanged. The application is designed to run locally so that the user can experiment with different transition lengths and phrase sizes without relying on cloud processing.
 
 \section{Related Work}
 The implementation follows core MIR concepts described by M{\"u}ller, especially onset analysis, beat tracking, and chroma features \cite{muller2015fundamentals}. Beat tracking remains a difficult task because musical styles vary widely in meter, groove, and production style; B{\"o}ck, Krebs, and Widmer show that multi-model beat tracking can improve robustness across heterogeneous recordings \cite{bock2014multi}. AutoDJ uses \texttt{librosa}, a widely used Python MIR library that exposes beat tracking, chroma extraction, time stretching, and pitch shifting in a reproducible research-oriented interface \cite{mcfee2015librosa}. The most direct precedent is Ishizaki et al.'s full-automatic DJ mixing system, which studies tempo adjustment and user discomfort in automatic transitions \cite{ishizaki2009automatic}.
 
 \section{Technology}
 \subsection{Tempo Detection and Time Stretching}
-For each track, the backend converts the stereo signal to mono for analysis and estimates global tempo using beat tracking. Let \(B_A\) and \(B_B\) be the detected tempos of Track A and Track B. The incoming track is time-stretched with rate
+For each track, the backend converts the stereo signal to mono for analysis and estimates global tempo using beat tracking. Let \(B_A\) and \(B_B\) be the detected tempos of Track A and Track B. Instead of changing the entire incoming song, AutoDJ modifies only the overlap. Track A's transition phrase uses the local rate
 \[
-    r = \frac{B_A}{B_B}.
+    r_A = \frac{B_B}{B_A},
 \]
-If Track B is slower than Track A, \(r>1\) shortens and speeds up the signal. If it is faster, \(r<1\) lengthens and slows down the signal. The implementation clamps extreme ratios to avoid severe artifacts. The stretching uses a phase-vocoder-based method through \texttt{librosa.effects.time\_stretch}.
+so if Track B is faster, Track A accelerates during the handoff. The implementation applies this change progressively across small chunks rather than suddenly applying one constant rate. Track B is not time-stretched; its opening phrase is only level-shaped during the overlap, and the untouched Track B body is appended after the transition.
 
 \subsection{Key Estimation and Camelot Compatibility}
 The system estimates key using chroma features. Chroma vectors summarize the energy of the twelve pitch classes independent of octave. AutoDJ averages chroma over time and compares the result against Krumhansl-Schmuckler major and minor profiles. The best-scoring tonic and mode are converted to a Camelot Wheel code.
 
-Camelot compatibility is treated as a simple rule set. Two tracks are compatible when they share the same number, when they are adjacent numbers in the same mode, or when they form a relative major/minor pair under the same number. If harmonic correction is enabled, the backend tests pitch shifts from \(-6\) to \(+6\) semitones and selects the smallest shift that makes Track B compatible with Track A.
+Camelot compatibility is treated as a simple rule set. Two tracks are compatible when they share the same number, when they are adjacent numbers in the same mode, or when they form a relative major/minor pair under the same number. If harmonic correction is enabled, the backend tests pitch shifts from \(-6\) to \(+6\) semitones and selects the smallest shift that makes Track A's transition segment compatible with Track B. The main body of Track B is not pitch-shifted.
 
 \subsection{Phrase Selection and Crossfading}
-The transition point is chosen near the final third of Track A while respecting the estimated beat grid. The user can select phrase sizes of 4, 8, or 16 bars. For a 4/4 assumption, this gives phrase lengths of 16, 32, or 64 beats. The backend chooses the candidate beat nearest the target region and starts Track B one crossfade length before the cut point.
+The transition point is chosen near the final third of Track A while respecting the estimated beat grid. The user can select phrase sizes of 8, 16, or 24 bars, and the backend estimates transition duration from the detected BPM, selected phrase length, and tempo gap between the two tracks. At the beginning of the transition, Track A reaches the target tempo quickly. Track B enters during this alignment phase and then becomes stronger while Track A is attenuated. The backend separates Track B's opening phrase into low-frequency and higher-frequency bands and fades the low-frequency band in first.
 
 The crossfade uses equal-power curves:
 \[
@@ -53,7 +53,7 @@ The crossfade uses equal-power curves:
 These curves reduce the perceived level drop that can occur with a linear crossfade.
 
 \section{Implementation}
-The project is organized as a local full-stack application. The backend is a FastAPI service with a \texttt{/api/mix} endpoint. It stores uploads, runs the MIR pipeline, writes a WAV file, and returns a JSON analysis report containing BPM, key, Camelot codes, tempo ratio, pitch shift, cut time, and download URL. The frontend is a Vite React application with two upload decks, transition controls, rendering state, an audio preview, and analysis metrics.
+The project is organized as a local full-stack application. The backend is a FastAPI service with a \texttt{/api/mix} endpoint. It stores uploads, runs the MIR pipeline, writes a WAV file, and returns a JSON analysis report containing BPM, key, Camelot codes, local transition rates, transition pitch shift, cut time, body resume point, and download URL. The frontend is a Vite React application with two upload decks, transition controls, rendering state, an audio preview, and analysis metrics.
 
 \begin{table}[h]
 \centering
@@ -63,9 +63,9 @@ Module & Method & Output \\
 \midrule
 Beat tracking & \texttt{librosa.beat.beat\_track} & BPM and beat times \\
 Key estimation & Chroma + tonal profiles & Key and Camelot code \\
-Tempo alignment & Phase-vocoder time stretch & BPM-matched Track B \\
-Harmonic correction & Semitone search & Compatible Track B key \\
-Mix rendering & Equal-power crossfade & WAV transition \\
+Tempo alignment & Local phase-vocoder time stretch & Transition-only tempo morph \\
+Harmonic correction & Semitone search & Compatible transition key \\
+Mix rendering & Bass-first equal-power overlap & WAV transition \\
 \bottomrule
 \end{tabular}
 \caption{Core AutoDJ pipeline.}

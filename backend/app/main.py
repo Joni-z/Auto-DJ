@@ -21,12 +21,7 @@ app = FastAPI(title="AutoDJ API", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:4173",
-        "http://127.0.0.1:4173",
-    ],
+    allow_origin_regex=r"^http://(localhost|127\.0\.0\.1):\d+$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -42,16 +37,14 @@ def health() -> dict[str, str]:
 async def mix(
     track_a: UploadFile = File(...),
     track_b: UploadFile = File(...),
-    crossfade_seconds: float = Form(8.0),
-    phrase_bars: int = Form(8),
+    crossfade_seconds: float | None = Form(None),
+    phrase_bars: int = Form(16),
     harmonic_correction: bool = Form(True),
 ) -> dict:
     if not track_a.filename or not track_b.filename:
         raise HTTPException(status_code=400, detail="Two audio files are required.")
-    if not 2 <= crossfade_seconds <= 30:
-        raise HTTPException(status_code=400, detail="crossfade_seconds must be between 2 and 30.")
-    if phrase_bars not in {4, 8, 16}:
-        raise HTTPException(status_code=400, detail="phrase_bars must be 4, 8, or 16.")
+    if phrase_bars not in {8, 16, 24}:
+        raise HTTPException(status_code=400, detail="phrase_bars must be 8, 16, or 24.")
 
     path_a = await save_upload(track_a, "a")
     path_b = await save_upload(track_b, "b")

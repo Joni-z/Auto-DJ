@@ -63,8 +63,8 @@ def process_mix(
     track_a_path: Path,
     track_b_path: Path,
     output_dir: Path,
-    crossfade_seconds: float = 8.0,
-    phrase_bars: int = 8,
+    crossfade_seconds: float | None = None,
+    phrase_bars: int = 16,
     harmonic_correction: bool = True,
 ) -> dict[str, Any]:
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -74,29 +74,29 @@ def process_mix(
 
     analysis_a = analyze_track(y_a, sr)
     analysis_b = analyze_track(y_b, sr)
+    transition_seconds = choose_transition_duration(analysis_a.bpm, analysis_b.bpm, phrase_bars)
 
-    tempo_rate = clamp(analysis_a.bpm / max(analysis_b.bpm, 1e-6), 0.65, 1.55)
-    suggested_shift = suggest_harmonic_shift(analysis_a, analysis_b)
+    suggested_shift = suggest_harmonic_shift(analysis_b, analysis_a)
     applied_shift = suggested_shift if harmonic_correction else 0
 
-    y_b_processed = time_stretch_multichannel(y_b, tempo_rate)
-    if applied_shift:
-        y_b_processed = pitch_shift_multichannel(y_b_processed, sr, applied_shift)
-
-    shifted_b = analyze_shifted_key(analysis_b, applied_shift)
     cut_seconds = choose_cut_point(
         analysis_a=analysis_a,
         duration_a=samples_to_seconds(y_a.shape[-1], sr),
-        crossfade_seconds=crossfade_seconds,
+        crossfade_seconds=transition_seconds,
         phrase_bars=phrase_bars,
     )
 
-    mixed = render_crossfade(
+    mixed, transition_meta = render_automix_transition(
         y_a=y_a,
-        y_b=y_b_processed,
+        y_b=y_b,
         sr=sr,
+        bpm_a=analysis_a.bpm,
+        bpm_b=analysis_b.bpm,
+        beats_a=analysis_a.beats,
+        beats_b=analysis_b.beats,
         cut_seconds=cut_seconds,
-        crossfade_seconds=crossfade_seconds,
+        transition_seconds=transition_seconds,
+        key_shift_a=applied_shift,
     )
     mixed = normalize_peak(mixed, peak=0.96)
 
@@ -105,7 +105,8 @@ def process_mix(
     sf.write(output_path, mixed.T, sr, subtype="PCM_16")
 
     compatibility_before = camelot_compatible(analysis_a.camelot, analysis_b.camelot)
-    compatibility_after = camelot_compatible(analysis_a.camelot, shifted_b["camelot"])
+    shifted_a = analyze_shifted_key(analysis_a, applied_shift)
+    compatibility_after = camelot_compatible(shifted_a["camelot"], analysis_b.camelot)
 
     return {
         "id": output_id,
@@ -114,21 +115,26 @@ def process_mix(
         "mix": {
             "duration_seconds": round(samples_to_seconds(mixed.shape[-1], sr), 2),
             "cut_seconds": round(cut_seconds, 2),
-            "crossfade_seconds": round(crossfade_seconds, 2),
-            "tempo_rate": round(float(tempo_rate), 4),
+            "crossfade_seconds": round(transition_seconds, 2),
+            "tempo_rate": round(float(transition_meta["b_intro_rate"]), 4),
+            "a_transition_rate": round(float(transition_meta["a_transition_rate"]), 4),
+            "b_intro_rate": round(float(transition_meta["b_intro_rate"]), 4),
+            "b_body_start_seconds": round(float(transition_meta["b_body_start_seconds"]), 2),
             "pitch_shift_semitones": int(applied_shift),
         },
         "track_a": analysis_to_dict(analysis_a),
         "track_b": analysis_to_dict(analysis_b),
         "track_b_after_processing": {
-            "estimated_key": shifted_b["key"],
-            "estimated_camelot": shifted_b["camelot"],
-            "estimated_bpm": round(float(analysis_b.bpm * tempo_rate), 2),
+            "estimated_key": analysis_b.key,
+            "estimated_camelot": analysis_b.camelot,
+            "estimated_bpm": round(float(analysis_b.bpm), 2),
         },
         "harmonic": {
             "compatible_before": compatibility_before,
             "compatible_after": compatibility_after,
             "suggested_pitch_shift_semitones": int(suggested_shift),
+            "transition_key": shifted_a["key"],
+            "transition_camelot": shifted_a["camelot"],
         },
     }
 
@@ -240,57 +246,222 @@ def choose_cut_point(
     phrase_bars: int,
 ) -> float:
     safe_end = max(duration_a - 1.0, crossfade_seconds + 1.0)
-    target = min(duration_a * 0.72, safe_end)
+    target = safe_end
     phrase_beats = max(4, int(phrase_bars) * 4)
 
     beat_times = [t for t in analysis_a.beats if crossfade_seconds + 1.0 <= t <= safe_end]
     phrase_times = [t for idx, t in enumerate(beat_times) if idx > 0 and idx % phrase_beats == 0]
-    candidates = phrase_times or beat_times
+    beat_duration = 60.0 / max(analysis_a.bpm, 1.0)
+    phrase_duration = beat_duration * phrase_beats
+    phrase_is_close = bool(phrase_times) and (target - phrase_times[-1]) <= min(phrase_duration * 0.5, 12.0)
+    candidates = phrase_times if phrase_is_close else beat_times
     if candidates:
         return min(candidates, key=lambda t: abs(t - target))
 
-    beat_duration = 60.0 / max(analysis_a.bpm, 1.0)
-    phrase_duration = beat_duration * phrase_beats
     if phrase_duration <= 0:
         return target
-    phrase_index = max(1, round(target / phrase_duration))
-    return min(max(phrase_index * phrase_duration, crossfade_seconds + 1.0), safe_end)
+    beat_index = max(1, round(target / beat_duration))
+    return min(max(beat_index * beat_duration, crossfade_seconds + 1.0), safe_end)
 
 
-def render_crossfade(
+def choose_transition_duration(bpm_a: float, bpm_b: float, phrase_bars: int) -> float:
+    reference_bpm = float(np.nanmedian([max(bpm_a, 1.0), max(bpm_b, 1.0)]))
+    phrase_seconds = max(1.0, phrase_bars * 4.0 * 60.0 / reference_bpm)
+    tempo_gap = abs(np.log2(max(bpm_b, 1.0) / max(bpm_a, 1.0)))
+    complexity_bonus = clamp(tempo_gap * 10.0, 0.0, 4.0)
+    target = phrase_seconds * 0.55 + complexity_bonus
+    return round(clamp(target, 12.0, 32.0), 2)
+
+
+def render_automix_transition(
     y_a: np.ndarray,
     y_b: np.ndarray,
     sr: int,
+    bpm_a: float,
+    bpm_b: float,
+    beats_a: list[float],
+    beats_b: list[float],
     cut_seconds: float,
-    crossfade_seconds: float,
-) -> np.ndarray:
-    crossfade_samples = max(1, int(crossfade_seconds * sr))
+    transition_seconds: float,
+    key_shift_a: int,
+) -> tuple[np.ndarray, dict[str, float]]:
+    transition_samples = max(1, int(transition_seconds * sr))
     cut_sample = int(cut_seconds * sr)
-    start_b = max(0, cut_sample - crossfade_samples)
-    a_end = min(y_a.shape[-1], start_b + crossfade_samples)
-    actual_fade = max(1, a_end - start_b)
 
-    output_len = max(a_end, start_b + y_b.shape[-1])
-    out = np.zeros((2, output_len), dtype=np.float32)
+    a_transition_rate = clamp(max(bpm_b, 1.0) / max(bpm_a, 1.0), 0.82, 1.18)
+    b_intro_rate = 1.0
 
-    out[:, :a_end] += y_a[:, :a_end]
+    align_seconds = min(transition_seconds * 0.18, 2.0 * 60.0 / max(bpm_a, 1.0))
+    align_samples = max(1, int(align_seconds * sr))
+    blend_samples = max(1, transition_samples - align_samples)
+    average_a_rate = weighted_average_rate(1.0, a_transition_rate, align_samples, blend_samples)
+    a_source_len = min(y_a.shape[-1], max(1, int(transition_samples * average_a_rate)))
+    transition_end = min(max(cut_sample, a_source_len), y_a.shape[-1])
+    transition_start = max(0, transition_end - a_source_len)
+    transition_start = snap_sample_to_previous_beat(transition_start, beats_a, sr)
+    b_entry_offset = choose_b_entry_offset(beats_b, sr)
+    b_source_len = min(y_b.shape[-1] - b_entry_offset, transition_samples)
 
-    b_copy_len = min(y_b.shape[-1], output_len - start_b)
-    out[:, start_b : start_b + b_copy_len] += y_b[:, :b_copy_len]
+    a_prefix = y_a[:, :transition_start]
+    a_source = y_a[:, transition_start:transition_end]
+    b_source = y_b[:, b_entry_offset : b_entry_offset + b_source_len]
 
-    fade = np.linspace(0.0, 1.0, actual_fade, dtype=np.float32)
-    fade_in = np.sin(fade * np.pi / 2.0)
-    fade_out = np.cos(fade * np.pi / 2.0)
+    a_transition = fast_align_time_stretch_multichannel(
+        y=a_source,
+        start_rate=1.0,
+        end_rate=a_transition_rate,
+        target_samples=transition_samples,
+        align_samples=align_samples,
+    )
+    b_intro = fit_length(b_source, transition_samples)
 
-    a_segment = y_a[:, start_b : start_b + actual_fade] * fade_out
-    b_segment = y_b[:, :actual_fade] * fade_in
-    out[:, start_b : start_b + actual_fade] = a_segment + b_segment
-    return out
+    if key_shift_a:
+        a_transition = key_morph_transition(a_transition, sr, key_shift_a)
+
+    b_intro = bass_first_intro(b_intro, sr)
+
+    position = np.arange(transition_samples, dtype=np.float32)
+    entry_delay = int(align_samples * 0.45)
+    early_b = smoothstep(np.clip((position - entry_delay) / max(1, align_samples - entry_delay), 0.0, 1.0))
+    main_b = smoothstep(np.clip((position - int(align_samples * 1.18)) / blend_samples, 0.0, 1.0))
+    b_fade = np.clip(0.28 * early_b + 0.82 * main_b, 0.0, 1.0)
+    fade_in = 0.04 + 0.98 * np.sin(b_fade * np.pi / 2.0)
+    a_duck = np.power(np.clip((position - align_samples) / blend_samples, 0.0, 1.0), 0.58).astype(np.float32)
+    fade_out = 1.0 - 0.9 * a_duck
+    transition = (a_transition * fade_out) + (b_intro * fade_in)
+
+    mixed = np.concatenate([a_prefix, transition], axis=1)
+    body_start = b_entry_offset + b_source_len
+    mixed = append_continuous_b_body(mixed, y_b, body_start, sr, fade_seconds=0.9)
+
+    return mixed, {
+        "a_transition_rate": float(a_transition_rate),
+        "b_intro_rate": float(b_intro_rate),
+        "b_body_start_seconds": samples_to_seconds(body_start, sr),
+    }
+
+
+def key_morph_transition(y: np.ndarray, sr: int, semitones: int) -> np.ndarray:
+    shifted = pitch_shift_multichannel(y, sr, semitones)
+    shifted = fit_length(shifted, y.shape[-1])
+    fade = smoothstep(np.linspace(0.0, 1.0, y.shape[-1], dtype=np.float32))
+    return (y * (1.0 - fade)) + (shifted * fade)
+
+
+def bass_first_intro(y: np.ndarray, sr: int) -> np.ndarray:
+    low_channels: list[np.ndarray] = []
+    high_channels: list[np.ndarray] = []
+    for channel in y:
+        low = low_band(channel, sr, cutoff_hz=180.0)
+        low_channels.append(low)
+        high_channels.append(channel[: low.shape[-1]] - low)
+
+    low = stack_channels(low_channels)
+    high = stack_channels(high_channels)
+    length = min(low.shape[-1], high.shape[-1])
+    low = low[:, :length]
+    high = high[:, :length]
+
+    x = np.linspace(0.0, 1.0, length, dtype=np.float32)
+    low_gain = 0.9 + 0.2 * smoothstep(np.clip(x / 0.3, 0.0, 1.0))
+    high_gain = 0.18 + 0.82 * smoothstep(np.clip((x - 0.08) / 0.72, 0.0, 1.0))
+    shaped = (low * low_gain) + (high * high_gain)
+    return morph_tail_to_original(shaped, y[:, :length], fade_samples=min(length, int(1.4 * sr)))
+
+
+def append_continuous_b_body(
+    head: np.ndarray,
+    original_b: np.ndarray,
+    body_start: int,
+    sr: int,
+    fade_seconds: float,
+) -> np.ndarray:
+    if body_start >= original_b.shape[-1]:
+        return head
+
+    fade_samples = min(int(fade_seconds * sr), head.shape[-1], body_start, original_b.shape[-1] - body_start)
+    if fade_samples <= 0:
+        return np.concatenate([head, original_b[:, body_start:]], axis=1)
+
+    # Reintroduce the same samples from Track B that the transition already used, then
+    # continue into the untouched body. This avoids a tiny discontinuity at the join.
+    tail_start = body_start - fade_samples
+    tail = original_b[:, tail_start:]
+    x = np.linspace(0.0, 1.0, fade_samples, dtype=np.float32)
+    fade_out = np.cos(x * np.pi / 2.0)
+    fade_in = np.sin(x * np.pi / 2.0)
+    overlap = (head[:, -fade_samples:] * fade_out) + (tail[:, :fade_samples] * fade_in)
+    return np.concatenate([head[:, :-fade_samples], overlap, tail[:, fade_samples:]], axis=1)
+
+
+def append_with_crossfade(head: np.ndarray, tail: np.ndarray, sr: int, fade_seconds: float) -> np.ndarray:
+    if tail.size == 0:
+        return head
+    fade_samples = min(int(fade_seconds * sr), head.shape[-1], tail.shape[-1])
+    if fade_samples <= 0:
+        return np.concatenate([head, tail], axis=1)
+
+    x = np.linspace(0.0, 1.0, fade_samples, dtype=np.float32)
+    fade_out = np.cos(x * np.pi / 2.0)
+    fade_in = np.sin(x * np.pi / 2.0)
+    overlap = (head[:, -fade_samples:] * fade_out) + (tail[:, :fade_samples] * fade_in)
+    return np.concatenate([head[:, :-fade_samples], overlap, tail[:, fade_samples:]], axis=1)
 
 
 def time_stretch_multichannel(y: np.ndarray, rate: float) -> np.ndarray:
     channels = [librosa.effects.time_stretch(channel, rate=rate) for channel in y]
     return stack_channels(channels)
+
+
+def progressive_time_stretch_multichannel(
+    y: np.ndarray,
+    start_rate: float,
+    end_rate: float,
+    target_samples: int,
+    chunks: int = 12,
+) -> np.ndarray:
+    if y.shape[-1] < chunks * 512:
+        return fit_length(time_stretch_multichannel(y, (start_rate + end_rate) / 2.0), target_samples)
+
+    boundaries = np.linspace(0, y.shape[-1], chunks + 1, dtype=int)
+    stretched_parts: list[np.ndarray] = []
+    for index in range(chunks):
+        start = boundaries[index]
+        end = boundaries[index + 1]
+        if end <= start:
+            continue
+        progress = index / max(1, chunks - 1)
+        eased = float(smoothstep(np.array([progress], dtype=np.float32))[0])
+        rate = start_rate + (end_rate - start_rate) * eased
+        stretched_parts.append(time_stretch_multichannel(y[:, start:end], rate))
+
+    if not stretched_parts:
+        return fit_length(y, target_samples)
+    return fit_length(concat_with_microfades(stretched_parts, fade_samples=512), target_samples)
+
+
+def fast_align_time_stretch_multichannel(
+    y: np.ndarray,
+    start_rate: float,
+    end_rate: float,
+    target_samples: int,
+    align_samples: int,
+) -> np.ndarray:
+    align_samples = min(max(1, align_samples), target_samples)
+    average_align_rate = (start_rate + end_rate) / 2.0
+    source_align_len = min(y.shape[-1], max(1, int(align_samples * average_align_rate)))
+    aligned = fit_length(time_stretch_multichannel(y[:, :source_align_len], average_align_rate), align_samples)
+
+    remaining_target = target_samples - align_samples
+    if remaining_target <= 0:
+        return fit_length(aligned, target_samples)
+
+    remaining_source = y[:, source_align_len:]
+    if remaining_source.shape[-1] <= 0:
+        sustain = fit_length(aligned[:, -1:], remaining_target)
+    else:
+        sustain = fit_length(time_stretch_multichannel(remaining_source, end_rate), remaining_target)
+    return fit_length(append_with_crossfade(aligned, sustain, SR, fade_seconds=0.08), target_samples)
 
 
 def pitch_shift_multichannel(y: np.ndarray, sr: int, semitones: int) -> np.ndarray:
@@ -301,6 +472,77 @@ def pitch_shift_multichannel(y: np.ndarray, sr: int, semitones: int) -> np.ndarr
 def stack_channels(channels: list[np.ndarray]) -> np.ndarray:
     min_len = min(channel.shape[-1] for channel in channels)
     return np.vstack([channel[:min_len] for channel in channels]).astype(np.float32)
+
+
+def concat_with_microfades(parts: list[np.ndarray], fade_samples: int) -> np.ndarray:
+    output = parts[0]
+    for part in parts[1:]:
+        output = append_with_crossfade(output, part, SR, fade_seconds=fade_samples / SR)
+    return output
+
+
+def low_band(channel: np.ndarray, sr: int, cutoff_hz: float) -> np.ndarray:
+    n_fft = 2048
+    hop_length = 512
+    spectrum = librosa.stft(channel, n_fft=n_fft, hop_length=hop_length)
+    freqs = librosa.fft_frequencies(sr=sr, n_fft=n_fft)
+    mask = (freqs <= cutoff_hz).astype(np.float32)[:, np.newaxis]
+    low = librosa.istft(spectrum * mask, hop_length=hop_length, length=channel.shape[-1])
+    return low.astype(np.float32)
+
+
+def snap_sample_to_previous_beat(sample: int, beat_times: list[float], sr: int) -> int:
+    if not beat_times:
+        return sample
+    beat_samples = [int(time * sr) for time in beat_times if int(time * sr) <= sample]
+    if not beat_samples:
+        return sample
+    return max(0, beat_samples[-1])
+
+
+def choose_b_entry_offset(beat_times: list[float], sr: int) -> int:
+    if not beat_times:
+        return 0
+    first_usable = next((time for time in beat_times if 0.05 <= time <= 4.0), None)
+    if first_usable is None:
+        return 0
+    return max(0, int(first_usable * sr))
+
+
+def morph_tail_to_original(shaped: np.ndarray, original: np.ndarray, fade_samples: int) -> np.ndarray:
+    length = min(shaped.shape[-1], original.shape[-1])
+    shaped = shaped[:, :length]
+    original = original[:, :length]
+    fade_samples = min(max(0, fade_samples), length)
+    if fade_samples <= 0:
+        return shaped.astype(np.float32)
+
+    out = shaped.copy()
+    x = smoothstep(np.linspace(0.0, 1.0, fade_samples, dtype=np.float32))
+    out[:, -fade_samples:] = (shaped[:, -fade_samples:] * (1.0 - x)) + (original[:, -fade_samples:] * x)
+    return out.astype(np.float32)
+
+
+def weighted_average_rate(start_rate: float, end_rate: float, align_samples: int, blend_samples: int) -> float:
+    if align_samples + blend_samples <= 0:
+        return end_rate
+    align_rate = (start_rate + end_rate) / 2.0
+    return ((align_rate * align_samples) + (end_rate * blend_samples)) / (align_samples + blend_samples)
+
+
+def fit_length(y: np.ndarray, target_samples: int) -> np.ndarray:
+    target_samples = max(1, int(target_samples))
+    if y.shape[-1] == target_samples:
+        return y.astype(np.float32)
+    if y.shape[-1] > target_samples:
+        return y[:, :target_samples].astype(np.float32)
+    pad_width = target_samples - y.shape[-1]
+    return np.pad(y, ((0, 0), (0, pad_width)), mode="edge").astype(np.float32)
+
+
+def smoothstep(x: np.ndarray) -> np.ndarray:
+    x = np.clip(x, 0.0, 1.0)
+    return (x * x * (3.0 - 2.0 * x)).astype(np.float32)
 
 
 def to_mono(y: np.ndarray) -> np.ndarray:
