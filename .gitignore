@@ -1,0 +1,16 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+node_modules/
+dist/
+backend/outputs/
+backend/uploads/
+*.aux
+*.bbl
+*.blg
+*.log
+*.out
+*.pdf
+*.toc
