@@ -11,7 +11,8 @@ import {
 } from "lucide-react";
 import "./styles.css";
 
-const API_BASE = import.meta.env.VITE_API_URL ?? "http://127.0.0.1:8000";
+const API_BASE =
+  import.meta.env.VITE_API_URL ?? `${window.location.protocol}//${window.location.hostname}:8000`;
 
 type MixResponse = {
   filename: string;
@@ -78,7 +79,7 @@ function App() {
         method: "POST",
         body: formData,
       });
-      const payload = await response.json();
+      const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
         throw new Error(payload.detail ?? "Mix failed.");
       }

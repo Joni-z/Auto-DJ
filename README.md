@@ -10,6 +10,14 @@ AutoDJ is a local full-stack automatic DJ transition tool. Upload two audio file
 
 ## Run Locally
 
+One-command dev server:
+
+```bash
+./run_dev.sh
+```
+
+The script starts both backend and frontend, then prints local and LAN URLs.
+
 Terminal 1:
 
 ```bash
