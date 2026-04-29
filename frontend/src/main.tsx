@@ -20,6 +20,7 @@ type MixResponse = {
   mix: {
     duration_seconds: number;
     cut_seconds: number;
+    transition_start_seconds: number;
     crossfade_seconds: number;
     tempo_rate: number;
     a_transition_rate: number;
@@ -166,6 +167,7 @@ function App() {
                   label="Transition Key"
                   value={`${result.harmonic.transition_key} · ${result.harmonic.transition_camelot}`}
                 />
+                <Metric label="Transition Starts" value={`${result.mix.transition_start_seconds}s`} />
                 <Metric label="B Body Starts" value={`${result.mix.b_body_start_seconds}s`} />
                 <Metric label="A Ends" value={`${result.mix.cut_seconds}s`} />
               </div>

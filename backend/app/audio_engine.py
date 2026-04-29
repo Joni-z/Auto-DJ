@@ -12,6 +12,8 @@ import soundfile as sf
 
 SR = 44_100
 MAX_AUDIO_SECONDS = 12 * 60
+MIN_LATE_TRANSITION_RATIO = 0.72
+DEFAULT_END_GUARD_SECONDS = 0.75
 PITCH_CLASS_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
 
 MAJOR_PROFILE = np.array([6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88])
@@ -74,16 +76,24 @@ def process_mix(
 
     analysis_a = analyze_track(y_a, sr)
     analysis_b = analyze_track(y_b, sr)
-    transition_seconds = choose_transition_duration(analysis_a.bpm, analysis_b.bpm, phrase_bars)
+    duration_a = samples_to_seconds(y_a.shape[-1], sr)
+    transition_seconds = crossfade_seconds or choose_transition_duration(analysis_a.bpm, analysis_b.bpm, phrase_bars)
+    transition_seconds = constrain_transition_duration_for_late_entry(
+        transition_seconds=transition_seconds,
+        duration_a=duration_a,
+        bpm_a=analysis_a.bpm,
+        bpm_b=analysis_b.bpm,
+    )
 
     suggested_shift = suggest_harmonic_shift(analysis_b, analysis_a)
     applied_shift = suggested_shift if harmonic_correction else 0
 
-    cut_seconds = choose_cut_point(
+    transition_start_seconds = choose_transition_start_point(
         analysis_a=analysis_a,
-        duration_a=samples_to_seconds(y_a.shape[-1], sr),
-        crossfade_seconds=transition_seconds,
+        duration_a=duration_a,
+        transition_seconds=transition_seconds,
         phrase_bars=phrase_bars,
+        bpm_b=analysis_b.bpm,
     )
 
     mixed, transition_meta = render_automix_transition(
@@ -92,9 +102,8 @@ def process_mix(
         sr=sr,
         bpm_a=analysis_a.bpm,
         bpm_b=analysis_b.bpm,
-        beats_a=analysis_a.beats,
         beats_b=analysis_b.beats,
-        cut_seconds=cut_seconds,
+        transition_start_seconds=transition_start_seconds,
         transition_seconds=transition_seconds,
         key_shift_a=applied_shift,
     )
@@ -114,7 +123,8 @@ def process_mix(
         "download_url": f"/api/download/{output_path.name}",
         "mix": {
             "duration_seconds": round(samples_to_seconds(mixed.shape[-1], sr), 2),
-            "cut_seconds": round(cut_seconds, 2),
+            "cut_seconds": round(float(transition_meta["a_source_end_seconds"]), 2),
+            "transition_start_seconds": round(float(transition_meta["transition_start_seconds"]), 2),
             "crossfade_seconds": round(transition_seconds, 2),
             "tempo_rate": round(float(transition_meta["b_intro_rate"]), 4),
             "a_transition_rate": round(float(transition_meta["a_transition_rate"]), 4),
@@ -239,19 +249,33 @@ def analyze_shifted_key(track: TrackAnalysis, shift: int) -> dict[str, str]:
     }
 
 
-def choose_cut_point(
+def choose_transition_start_point(
     analysis_a: TrackAnalysis,
     duration_a: float,
-    crossfade_seconds: float,
+    transition_seconds: float,
     phrase_bars: int,
+    bpm_b: float,
 ) -> float:
-    safe_end = max(duration_a - 1.0, crossfade_seconds + 1.0)
-    target = safe_end
+    end_guard = min(DEFAULT_END_GUARD_SECONDS, max(0.0, duration_a * 0.05))
+    safe_end = max(0.0, duration_a - end_guard)
     phrase_beats = max(4, int(phrase_bars) * 4)
-
-    beat_times = [t for t in analysis_a.beats if crossfade_seconds + 1.0 <= t <= safe_end]
-    phrase_times = [t for idx, t in enumerate(beat_times) if idx > 0 and idx % phrase_beats == 0]
     beat_duration = 60.0 / max(analysis_a.bpm, 1.0)
+    estimated_source_seconds = estimate_a_transition_source_seconds(
+        transition_seconds=transition_seconds,
+        bpm_a=analysis_a.bpm,
+        bpm_b=bpm_b,
+    )
+    latest_start = max(0.0, safe_end - estimated_source_seconds)
+    late_floor = max(0.0, duration_a * MIN_LATE_TRANSITION_RATIO)
+    target = max(late_floor, latest_start)
+    target = min(target, latest_start if latest_start > 0 else safe_end)
+
+    beat_times = [t for t in analysis_a.beats if late_floor <= t <= latest_start]
+    phrase_times = [
+        t
+        for idx, t in enumerate(analysis_a.beats)
+        if idx > 0 and idx % phrase_beats == 0 and late_floor <= t <= latest_start
+    ]
     phrase_duration = beat_duration * phrase_beats
     phrase_is_close = bool(phrase_times) and (target - phrase_times[-1]) <= min(phrase_duration * 0.5, 12.0)
     candidates = phrase_times if phrase_is_close else beat_times
@@ -261,7 +285,7 @@ def choose_cut_point(
     if phrase_duration <= 0:
         return target
     beat_index = max(1, round(target / beat_duration))
-    return min(max(beat_index * beat_duration, crossfade_seconds + 1.0), safe_end)
+    return min(max(beat_index * beat_duration, late_floor), latest_start if latest_start > 0 else safe_end)
 
 
 def choose_transition_duration(bpm_a: float, bpm_b: float, phrase_bars: int) -> float:
@@ -273,20 +297,49 @@ def choose_transition_duration(bpm_a: float, bpm_b: float, phrase_bars: int) -> 
     return round(clamp(target, 12.0, 32.0), 2)
 
 
+def constrain_transition_duration_for_late_entry(
+    transition_seconds: float,
+    duration_a: float,
+    bpm_a: float,
+    bpm_b: float,
+) -> float:
+    if duration_a <= 0:
+        return transition_seconds
+
+    end_guard = min(DEFAULT_END_GUARD_SECONDS, max(0.0, duration_a * 0.05))
+    late_tail_seconds = max(1.5, duration_a * (1.0 - MIN_LATE_TRANSITION_RATIO) - end_guard)
+    rate = estimate_a_transition_source_rate(transition_seconds, bpm_a, bpm_b)
+    max_transition_seconds = late_tail_seconds / max(rate, 0.1)
+    if transition_seconds <= max_transition_seconds:
+        return round(max(1.5, transition_seconds), 2)
+    return round(max(1.5, max_transition_seconds), 2)
+
+
+def estimate_a_transition_source_seconds(transition_seconds: float, bpm_a: float, bpm_b: float) -> float:
+    return transition_seconds * estimate_a_transition_source_rate(transition_seconds, bpm_a, bpm_b)
+
+
+def estimate_a_transition_source_rate(transition_seconds: float, bpm_a: float, bpm_b: float) -> float:
+    a_transition_rate = clamp(max(bpm_b, 1.0) / max(bpm_a, 1.0), 0.82, 1.18)
+    align_seconds = min(transition_seconds * 0.18, 2.0 * 60.0 / max(bpm_a, 1.0))
+    align_samples = max(1, int(align_seconds * SR))
+    transition_samples = max(1, int(transition_seconds * SR))
+    blend_samples = max(1, transition_samples - align_samples)
+    return weighted_average_rate(1.0, a_transition_rate, align_samples, blend_samples)
+
+
 def render_automix_transition(
     y_a: np.ndarray,
     y_b: np.ndarray,
     sr: int,
     bpm_a: float,
     bpm_b: float,
-    beats_a: list[float],
     beats_b: list[float],
-    cut_seconds: float,
+    transition_start_seconds: float,
     transition_seconds: float,
     key_shift_a: int,
 ) -> tuple[np.ndarray, dict[str, float]]:
     transition_samples = max(1, int(transition_seconds * sr))
-    cut_sample = int(cut_seconds * sr)
 
     a_transition_rate = clamp(max(bpm_b, 1.0) / max(bpm_a, 1.0), 0.82, 1.18)
     b_intro_rate = 1.0
@@ -296,9 +349,8 @@ def render_automix_transition(
     blend_samples = max(1, transition_samples - align_samples)
     average_a_rate = weighted_average_rate(1.0, a_transition_rate, align_samples, blend_samples)
     a_source_len = min(y_a.shape[-1], max(1, int(transition_samples * average_a_rate)))
-    transition_end = min(max(cut_sample, a_source_len), y_a.shape[-1])
-    transition_start = max(0, transition_end - a_source_len)
-    transition_start = snap_sample_to_previous_beat(transition_start, beats_a, sr)
+    transition_start = min(max(0, int(transition_start_seconds * sr)), y_a.shape[-1] - 1)
+    transition_end = min(max(transition_start + a_source_len, transition_start + 1), y_a.shape[-1])
     b_entry_offset = choose_b_entry_offset(beats_b, sr)
     b_source_len = min(y_b.shape[-1] - b_entry_offset, transition_samples)
 
@@ -337,6 +389,8 @@ def render_automix_transition(
     return mixed, {
         "a_transition_rate": float(a_transition_rate),
         "b_intro_rate": float(b_intro_rate),
+        "transition_start_seconds": samples_to_seconds(transition_start, sr),
+        "a_source_end_seconds": samples_to_seconds(transition_end, sr),
         "b_body_start_seconds": samples_to_seconds(body_start, sr),
     }
 
@@ -489,15 +543,6 @@ def low_band(channel: np.ndarray, sr: int, cutoff_hz: float) -> np.ndarray:
     mask = (freqs <= cutoff_hz).astype(np.float32)[:, np.newaxis]
     low = librosa.istft(spectrum * mask, hop_length=hop_length, length=channel.shape[-1])
     return low.astype(np.float32)
-
-
-def snap_sample_to_previous_beat(sample: int, beat_times: list[float], sr: int) -> int:
-    if not beat_times:
-        return sample
-    beat_samples = [int(time * sr) for time in beat_times if int(time * sr) <= sample]
-    if not beat_samples:
-        return sample
-    return max(0, beat_samples[-1])
 
 
 def choose_b_entry_offset(beat_times: list[float], sr: int) -> int:
