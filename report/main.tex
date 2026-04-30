@@ -7,81 +7,84 @@
 \usepackage{graphicx}
 \usepackage{microtype}
 
-\title{AutoDJ: A Music Information Retrieval System for Automatic DJ Transitions}
-\author{Music, the Mind and Artificial Intelligence Final Project}
-\date{Spring 2026}
+\title{AutoDJ: An Automated DJ Mixing Application}
+\author{Music, the Mind and Artificial Intelligence \\ Zhizhe Zhang}
 
 \begin{document}
-\maketitle
+    \maketitle
 
-\begin{abstract}
-AutoDJ is a local web application that renders an automatic transition between two user-provided audio tracks. The system combines beat tracking, tempo normalization, chroma-based key estimation, Camelot Wheel harmonic compatibility, and equal-power crossfading. The goal is not to replace a human DJ, but to demonstrate how music information retrieval (MIR) techniques can support a practical creative workflow. The implementation consists of a FastAPI audio engine and a React interface for uploading tracks, controlling transition parameters, previewing the result, and downloading the rendered mix.
-\end{abstract}
+    \begin{abstract}
+        AutoDJ is a web application based on the local computer, which creates an automated transition between two input audio tracks of a user. It uses a combination of techniques including beat detection, tempo synchronization, chroma analysis for key recognition, Camelot Wheel for harmonizing the tracks, and equal power cross-fade. However, its aim is not to substitute an actual DJ but rather showcase how MIR techniques can be used in such a scenario. AutoDJ implementation involves a FastAPI audio engine and React frontend. The project repository is available at \href{https://github.com/Joni-z/Auto-DJ}{github.com/Joni-z/Auto-DJ}.
+    \end{abstract}
 
-\section{Introduction}
-DJ mixing is a real-time musical practice built around timing, phrasing, timbre, and harmonic continuity. A smooth transition usually requires the incoming track to be tempo-aligned with the outgoing track, introduced at a musically meaningful phrase boundary, and blended without abrupt level changes. Human DJs learn these decisions through listening and repeated practice. AutoDJ investigates how far a compact MIR pipeline can automate this workflow for two arbitrary audio clips.
+    \section{Introduction}
+    DJ mixing is an example of a musical technique performed in real-time that relies on rhythm, phrasing, timbre, and harmony. For a smooth transition, the new song needs to be matched in terms of tempo with the old song, enter the scene at a point where a phrase ends, and the levels should not change suddenly. Humans learn how to do this after years of listening experience and practice. AutoDJ tries to figure out how far such a pipeline can go along the same route using nothing more than audio signal processing and some basic psychoacoustic principles.
 
-The project accepts two audio files: Track A, the outgoing track, and Track B, the incoming track. It estimates the tempo and key of each file, selects a phrase-aligned cut point in Track A, and modifies only the transition region. Track A's final phrase can be gradually time-stretched and pitch-morphed toward Track B, while Track B remains at its original tempo and key. During the overlap, Track B's low-frequency content enters before the full mix, after which the original Track B body resumes unchanged. The application is designed to run locally so that the user can experiment with different transition lengths and phrase sizes without relying on cloud processing.
+    There are two goals that this project aims to achieve. Firstly, this project is used as an implementation example of the most essential MIR methods discussed throughout the semester, namely beat tracking, key detection using chroma, time stretching, and tonal compatibility. Secondly, the purpose of this project is to have it as something practical; therefore, a user who does not have any DJ software or experience will be able to upload two songs, push a button, and get their mashup delivered. The visualization of the algorithm's actions was considered to be an important task for designing, which means that a user will know about and control the choices made by the algorithm.
 
-\section{Related Work}
-The implementation follows core MIR concepts described by M{\"u}ller, especially onset analysis, beat tracking, and chroma features \cite{muller2015fundamentals}. Beat tracking remains a difficult task because musical styles vary widely in meter, groove, and production style; B{\"o}ck, Krebs, and Widmer show that multi-model beat tracking can improve robustness across heterogeneous recordings \cite{bock2014multi}. AutoDJ uses \texttt{librosa}, a widely used Python MIR library that exposes beat tracking, chroma extraction, time stretching, and pitch shifting in a reproducible research-oriented interface \cite{mcfee2015librosa}. The most direct precedent is Ishizaki et al.'s full-automatic DJ mixing system, which studies tempo adjustment and user discomfort in automatic transitions \cite{ishizaki2009automatic}.
+    The project accepts two audio files: Track A (outgoing) and Track B (incoming). It estimates the tempo and key of each file, selects a phrase-aligned cut point near the end of Track A, and modifies only the transition region. Track A's final phrase is gradually time-stretched and optionally pitch-morphed toward Track B, while Track B remains at its original tempo and key throughout. During the overlap, Track B's low-frequency content is introduced first, following a common technique in DJ practice known as a bass swap. The application runs entirely locally so that the user can experiment with different phrase sizes and harmonic settings without relying on cloud processing.
 
-\section{Technology}
-\subsection{Tempo Detection and Time Stretching}
-For each track, the backend converts the stereo signal to mono for analysis and estimates global tempo using beat tracking. Let \(B_A\) and \(B_B\) be the detected tempos of Track A and Track B. Instead of changing the entire incoming song, AutoDJ modifies only the overlap. Track A's transition phrase uses the local rate
-\[
-    r_A = \frac{B_B}{B_A},
-\]
-so if Track B is faster, Track A accelerates during the handoff. The implementation applies this change progressively across small chunks rather than suddenly applying one constant rate. Track B is not time-stretched; its opening phrase is only level-shaped during the overlap, and the untouched Track B body is appended after the transition.
+    \section{Related Work}
+    It employs key principles of MIR, as outlined by M{"u}ller, including onset detection, beat tracking, and chroma-based features \cite{muller2015fundamentals}. Beat tracking is an especially challenging problem, due to differences between genres in terms of meter, groove, and production style; B{"o}ck, Krebs, and Widmer demonstrate that multi-modal beat tracking could increase robustness in dealing with diverse inputs \cite{bock2014multi}. In AutoDJ, key estimation utilizes the Krumhansl-Schmuckler model, where an average chroma feature vector of the song is matched against tonal structures found in cognition experiments; pitch-class salience functions are taken from cognitive psychoacoustic experiments pioneered by Krumhansl \cite{krumhansl1990cognitive}. AutoDJ leverages the use of librosa, an open-source Python MIR library implementing beat tracking, chroma features, time-stretching, and pitch-shifting algorithms \cite{mcfee2015librosa}. The closest related work is the fully-automatic DJ-mixing software of Ishizaki et al., which examines user discomfort with automated tempo adaptation \cite{ishizaki2009automatic}.
 
-\subsection{Key Estimation and Camelot Compatibility}
-The system estimates key using chroma features. Chroma vectors summarize the energy of the twelve pitch classes independent of octave. AutoDJ averages chroma over time and compares the result against Krumhansl-Schmuckler major and minor profiles. The best-scoring tonic and mode are converted to a Camelot Wheel code.
+    \section{Technology}
+    \subsection{Tempo Detection and Time Stretching}
+    For each individual song, the backend performs the analysis of the mono signal, and it calculates the global tempo via beat detection. Suppose \(B_A\) and \(B_B\) are the detected tempos for Track A and Track B respectively. AutoDJ does not transform the entire inputted song but rather the overlapping portion. The transition phrase of Track A uses the local tempo rate
+    \[
+        r_A = \frac{B_B}{B_A},
+    \]
+    Thus, when Track B is quicker, Track A will speed up during the hand-off period. In terms of execution, the change is applied gradually to smaller sections as opposed to changing at a constant rate all at once. Track B does not involve any stretching of time but involves leveling of its initial portion.
 
-Camelot compatibility is treated as a simple rule set. Two tracks are compatible when they share the same number, when they are adjacent numbers in the same mode, or when they form a relative major/minor pair under the same number. If harmonic correction is enabled, the backend tests pitch shifts from \(-6\) to \(+6\) semitones and selects the smallest shift that makes Track A's transition segment compatible with Track B. The main body of Track B is not pitch-shifted.
+    \subsection{Key Estimation and Camelot Compatibility}
+    Key is determined by chroma-based properties. Chroma vectors capture the power of the 12 pitch classes regardless of octave. AutoDJ computes the average value of chroma over time and calculates its similarity to major and minor scales according to Krumhansl-Schmuckler theory. The highest-rated key and mode are encoded into the Camelot Wheel notation.
 
-\subsection{Phrase Selection and Crossfading}
-The transition point is chosen near the final third of Track A while respecting the estimated beat grid. The user can select phrase sizes of 8, 16, or 24 bars, and the backend estimates transition duration from the detected BPM, selected phrase length, and tempo gap between the two tracks. At the beginning of the transition, Track A reaches the target tempo quickly. Track B enters during this alignment phase and then becomes stronger while Track A is attenuated. The backend separates Track B's opening phrase into low-frequency and higher-frequency bands and fades the low-frequency band in first.
+    Camelot key compatibility is seen as a set of simple rules. Tracks are compatible if their keys are the same, if they are sequential numbers in the same key mode, or if they are a relative major/minor in the same number. In the case where harmonic correction is turned on, pitch shifts between (-6) and (+6) are tested for and the minimum pitch shift resulting in compatibility between Track A's transition and Track B is selected. The rest of Track B remains unaffected by pitch shifting.
 
-The crossfade uses equal-power curves:
-\[
-    g_A(t) = \cos\left(\frac{\pi t}{2}\right),
-    \quad
-    g_B(t) = \sin\left(\frac{\pi t}{2}\right),
-    \quad
-    0 \leq t \leq 1.
-\]
-These curves reduce the perceived level drop that can occur with a linear crossfade.
+    \subsection{Phrase Selection and Crossfading}
+    The transition is triggered at a point close to the last third of Track A, but taking into account the estimated beat grid. The user may choose any phrase lengths of 8, 16, or 24 bars, and the backend calculates the transition length based on the estimated BPM, phrase length chosen by the user, and the tempo difference between the two tracks. In the initial stage of the transition, Track A attains its desired tempo rapidly within an alignment window; Track B joins in this process and gradually takes over Track A, which fades out. The backend splits the initial phrase of Track B into a low-band below 180 Hz and the rest of the high-band; the low-band is played initially, a strategy adopted from DJing whereby the bass and kick drum are played first to stabilize the listener's hearing before the rest of the track comes in.
 
-\section{Implementation}
-The project is organized as a local full-stack application. The backend is a FastAPI service with a \texttt{/api/mix} endpoint. It stores uploads, runs the MIR pipeline, writes a WAV file, and returns a JSON analysis report containing BPM, key, Camelot codes, local transition rates, transition pitch shift, cut time, body resume point, and download URL. The frontend is a Vite React application with two upload decks, transition controls, rendering state, an audio preview, and analysis metrics.
+    Gain curves during the transition are defined using a smoothstep function ($f(x)=3x^{2}-2x^{3}$), as opposed to linear ramps, to prevent any audible clicks between the endpoints of the blends. The major crossfade curve is an equal-power curve:
+    \[
+        g_A(t) = \cos\left(\frac{\pi t}{2}\right),
+        \quad
+        g_B(t) = \sin\left(\frac{\pi t}{2}\right),
+        \quad
+        0 \leq t \leq 1.
+    \]
+    This is achieved by ensuring that there is roughly constant loudness throughout the area of overlap since the value of the power sum $g_A^2(t) + g_B^2(t) = 1$ remains constant.
 
-\begin{table}[h]
-\centering
-\begin{tabular}{lll}
-\toprule
-Module & Method & Output \\
-\midrule
-Beat tracking & \texttt{librosa.beat.beat\_track} & BPM and beat times \\
-Key estimation & Chroma + tonal profiles & Key and Camelot code \\
-Tempo alignment & Local phase-vocoder time stretch & Transition-only tempo morph \\
-Harmonic correction & Semitone search & Compatible transition key \\
-Mix rendering & Bass-first equal-power overlap & WAV transition \\
-\bottomrule
-\end{tabular}
-\caption{Core AutoDJ pipeline.}
-\end{table}
+    \section{Implementation}
+    The structure of the project is designed as a fully-fledged local application. The backend is based on FastAPI technology. It has the \texttt{/api/mix} endpoint, which allows uploading the file, processing the file via the MIR pipeline, generating a .wav file, and returning a JSON-based analysis result, which includes information about BPM, key, Camelot codes, local transition rates, transition pitch shift, cut time, body resume point, and URL for downloading.
 
-\section{Results and Reflection}
-AutoDJ works best with music that has a stable beat, clear harmonic content, and phrase lengths close to conventional dance music structures. In those cases, the rendered transition usually aligns the incoming rhythm with the outgoing rhythm and produces a plausible crossfade. The analysis report is useful because it exposes the system's decisions rather than hiding them behind a single render button.
+    \begin{table}[h]
+        \centering
+        \begin{tabular}{lll}
+            \toprule
+            Module & Method & Output \\
+            \midrule
+            Beat tracking & \texttt{librosa.beat.beat\_track} & BPM and beat times \\
+            Key estimation & Chroma + tonal profiles & Key and Camelot code \\
+            Tempo alignment & Local phase-vocoder time stretch & Transition-only tempo morph \\
+            Harmonic correction & Semitone search & Compatible transition key \\
+            Mix rendering & Bass-first equal-power overlap & WAV transition \\
+            \bottomrule
+        \end{tabular}
+        \caption{Core AutoDJ pipeline.}
+    \end{table}
 
-The main limitations are inherited from global MIR assumptions. A single BPM estimate can fail on tracks with tempo changes, rubato passages, or weak percussion. Chroma-based key estimation can be confused by dense production, modal harmony, detuned samples, or short clips. Pitch shifting may introduce audible artifacts, especially for large shifts. The phrase-selection logic assumes 4/4 meter and regular phrase lengths, so it cannot yet identify high-level song structure such as intro, breakdown, drop, or outro.
+    \section{Results and Reflection}
+    However, if we speak about songs with steady rhythms, powerful harmonic information and phrase lengths close to those used in regular dancing music, the AutoDJ works really great. The transitions done by the AutoDJ are harmonious both for the new song and old one, and they give us a clean crossfade. The harmonic correction provided by Camelot proves effective when both songs have almost the same key because in this case the shift is almost imperceptible and allows us to improve the quality of the transition considerably through getting rid of the harsh overtone effect. As regards the analysis panel that included such details as the BPM, key, Camelot code, estimation of the shift and transition length, it proved much more useful than I expected from it originally, as I could estimate how good my attempt was and decide what to do next.
 
-Future improvements would include downbeat detection, structural segmentation, source separation for stem-aware EQ transitions, loudness normalization using LUFS, beat-synchronous waveform visualization, and an interactive timeline where the user can move the transition point before rendering.
+    These problems are due to limitations that stem from the global assumptions inherent to the field of machine listening. Specifically, the phase-vocoder technique will break down in case of complex tempo change, live rubato, and breakdown due to the absence of an absolute tempo for such track. In this case, phase vocoder stretches the audio at the incorrect rate and results in beats being out of sync. Chroma-based analysis, which uses the Krumhansl-Schmuckler dot product, will be inaccurate in presence of a rich production that uses more than one sample within the spectrum, tracks with non-standard tonality using modal scale and detuned synthesizers. Phrase selection algorithm will be unable to identify the bridges and breakdowns in the song as it assumes four-four time signature and eight bars as the phrase duration.
 
-\section{Conclusion}
-AutoDJ demonstrates how MIR can turn musical analysis into a usable creative tool. By combining tempo estimation, key detection, harmonic rules, and crossfade rendering, the system produces a complete automatic transition from two audio files. Its value lies in making the algorithmic decisions inspectable and adjustable, which keeps the user in the creative loop while automating the mechanical parts of beat matching and rendering.
+    The lesson I got from this is that the difference between an analytically correct answer and a perceptually smooth one could end up being very important in automated mixing. While it may be true that the tempo and key change amounts are completely accurate mathematically, it would be unlikely that it would end up sounding right if there is a large disparity in the energy distribution of the timbre in the two tracks and there happened to be a small error in picking out the right time to transition from one phrase to another.
 
-\bibliographystyle{plain}
-\bibliography{references}
+    Possible improvements in the future will involve adding downbeat detection, structural analysis, source separation, stem-aware equalization transitions, loudness normalization using LUFS values, and an interactive transition point selection interface.
+
+    \section{Conclusion}
+    This example demonstrates the potential of MIR technology in turning musical analysis into a valuable creative tool in AutoDJ. The problem that AutoDJ solves is the creation of a seamless transition between two audio tracks using methods like tempo detection, key detection, harmony rules, and crossfading. This system is valuable because it allows users to modify the algorithmically made decisions.
+
+    \bibliographystyle{plain}
+    \bibliography{references}
 
 \end{document}

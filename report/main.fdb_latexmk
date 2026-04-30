@@ -1,14 +1,14 @@
 # Fdb version 4
-["bibtex main"] 1777326132.78754 "main.aux" "main.bbl" "main" 1777326133.64331 0
-  "./references.bib" 1777317466.75636 1149 c7d2e0dd7e66f37edaca1b01912a62c5 ""
+["bibtex main"] 1777511306.81887 "main.aux" "main.bbl" "main" 1777521283.0849 0
+  "./references.bib" 1777509339.56217 1317 2497bcfafe5d5734a144f0261fa56932 ""
   "/usr/local/texlive/2024/texmf-dist/bibtex/bst/base/plain.bst" 1292289607 20613 bd3fbfa9f64872b81ac57a0dd2ed855f ""
-  "main.aux" 1777326133.40932 1668 7051cfb40529fb5a2f571f8cba9fa8d0 "pdflatex"
+  "main.aux" 1777521282.80945 1738 64c78fe1c369517a6d81478e67d5898c "pdflatex"
   (generated)
   "main.bbl"
   "main.blg"
   (rewritten before read)
-["pdflatex"] 1777326132.89437 "/Users/zzz/Documents/NYU/2026Spring/Music, the Mind and Artificial Intelligence/Projects_MMAI/Final/report/main.tex" "main.pdf" "main" 1777326133.64343 0
-  "/Users/zzz/Documents/NYU/2026Spring/Music, the Mind and Artificial Intelligence/Projects_MMAI/Final/report/main.tex" 1777323496.74942 8402 c738bbd8742ee4f2d0f09f184dbc777a ""
+["pdflatex"] 1777521282.18697 "/Users/zzz/Documents/NYU/2026Spring/Music, the Mind and Artificial Intelligence/Projects_MMAI/FinalProject/report/main.tex" "main.pdf" "main" 1777521283.08505 0
+  "/Users/zzz/Documents/NYU/2026Spring/Music, the Mind and Artificial Intelligence/Projects_MMAI/FinalProject/report/main.tex" 1777521281.72995 11543 f16976c7820c77c1eeb620df7ae46b73 ""
   "/usr/local/texlive/2024/texmf-dist/fonts/map/fontname/texfonts.map" 1577235249 3524 cb3e574dea2d1052e39280babc910dc8 ""
   "/usr/local/texlive/2024/texmf-dist/fonts/tfm/public/amsfonts/cmextra/cmex7.tfm" 1246382020 1004 54797486969f23fa377b128694d548df ""
   "/usr/local/texlive/2024/texmf-dist/fonts/tfm/public/amsfonts/cmextra/cmex8.tfm" 1246382020 988 bdf658c3bfc2d96d3c8b02cfc1c94c20 ""
@@ -37,6 +37,7 @@
   "/usr/local/texlive/2024/texmf-dist/fonts/type1/public/amsfonts/cm/cmr10.pfb" 1248133631 35752 024fb6c41858982481f6968b5fc26508 ""
   "/usr/local/texlive/2024/texmf-dist/fonts/type1/public/amsfonts/cm/cmr12.pfb" 1248133631 32722 d7379af29a190c3f453aba36302ff5a9 ""
   "/usr/local/texlive/2024/texmf-dist/fonts/type1/public/amsfonts/cm/cmr17.pfb" 1248133631 32362 179c33bbf43f19adbb3825bb4e36e57a ""
+  "/usr/local/texlive/2024/texmf-dist/fonts/type1/public/amsfonts/cm/cmr8.pfb" 1248133631 32726 0a1aea6fcd6468ee2cf64d891f5c43c8 ""
   "/usr/local/texlive/2024/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy10.pfb" 1248133631 32569 5e5ddc8df908dea60932f3c484a54c0d ""
   "/usr/local/texlive/2024/texmf-dist/fonts/type1/public/amsfonts/cm/cmti10.pfb" 1248133631 37944 359e864bd06cde3b1cf57bb20757fb06 ""
   "/usr/local/texlive/2024/texmf-dist/fonts/type1/public/amsfonts/cm/cmtt10.pfb" 1248133631 31099 c85edf1dd5b9e826d67c9c7293b6786c ""
@@ -96,10 +97,10 @@
   "/usr/local/texlive/2024/texmf-var/fonts/map/pdftex/updmap/pdftex.map" 1740576506.84147 5467645 128b85b7cde5f5edc5cb7f1dd7ff8736 ""
   "/usr/local/texlive/2024/texmf-var/web2c/pdftex/pdflatex.fmt" 1740576502 8221423 32518fba891ceb50495abb52c97db983 ""
   "/usr/local/texlive/2024/texmf.cnf" 1710266656 577 e590dabc9e28c5b61546e15f63eebcdf ""
-  "main.aux" 1777326133.40932 1668 7051cfb40529fb5a2f571f8cba9fa8d0 "pdflatex"
-  "main.bbl" 1777326132.89234 1082 cd4e14798326b91e570143af749e3741 "bibtex main"
-  "main.out" 1777326133.40994 1406 cab670b6a0d5336cfcfb531eca19299c "pdflatex"
-  "main.tex" 1777323496.74942 8402 c738bbd8742ee4f2d0f09f184dbc777a ""
+  "main.aux" 1777521282.80945 1738 64c78fe1c369517a6d81478e67d5898c "pdflatex"
+  "main.bbl" 1777511306.91109 1233 36b4bc9da0bb1b4ee5e0f6f7ba7b5c34 "bibtex main"
+  "main.out" 1777521282.80992 1406 cab670b6a0d5336cfcfb531eca19299c "pdflatex"
+  "main.tex" 1777521281.72995 11543 f16976c7820c77c1eeb620df7ae46b73 ""
   (generated)
   "main.aux"
   "main.log"
